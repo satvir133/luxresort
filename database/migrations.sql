@@ -97,3 +97,13 @@ SELECT r.id, p.id
 FROM `roles` r
 JOIN `permissions` p ON p.code IN ('rooms.read','rooms.write','pricing.write','bookings.write','payments.refund')
 WHERE r.name='staff';
+
+
+
+USE luxresort;
+CREATE TABLE IF NOT EXISTS leads (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  email VARCHAR(190) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

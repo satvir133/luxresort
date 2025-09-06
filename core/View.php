@@ -1,5 +1,9 @@
 <?php
-function url(string $path='/'): string {
-  $p = '/' . ltrim($path, '/');
-  return BASE_URL === '' ? $p : (BASE_URL . $p);
+class View {
+  public static function render(string $path, array $data = []) {
+    extract($data);
+    ob_start();
+    include $path;
+    return ob_get_clean();
+  }
 }

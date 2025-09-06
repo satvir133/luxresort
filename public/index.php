@@ -1,19 +1,17 @@
 <?php
 declare(strict_types=1);
 
-// BASE_URL like "/luxresort/public"
-$scriptDir = str_replace('\\','/', dirname($_SERVER['SCRIPT_NAME'] ?? ''));
-define('BASE_URL', rtrim($scriptDir, '/'));
-
-
 // Core
 require_once __DIR__.'/../core/Router.php';
 require_once __DIR__.'/../core/Request.php';
 require_once __DIR__.'/../core/Response.php';
 require_once __DIR__.'/../core/Session.php';
 require_once __DIR__.'/../core/View.php';
+require_once __DIR__.'/../core/Helpers.php'; // <-- BASE_URL + url() are defined here (guarded)
 
-// Load env (fallback to example)
+// DO NOT define BASE_URL again here.
+
+// Load env
 $env = is_file(__DIR__.'/../config/env.php')
   ? require __DIR__.'/../config/env.php'
   : require __DIR__.'/../config/env.example.php';
