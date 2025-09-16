@@ -107,3 +107,139 @@ CREATE TABLE IF NOT EXISTS leads (
   email VARCHAR(190) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- Ensure database exists
+CREATE DATABASE IF NOT EXISTS luxresort
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE luxresort;
+
+-- ROOM TYPES (category-level)
+CREATE TABLE IF NOT EXISTS room_types (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name            VARCHAR(120) NOT NULL,
+  slug            VARCHAR(140) NOT NULL UNIQUE,
+  description     TEXT NULL,
+  capacity        TINYINT UNSIGNED NOT NULL DEFAULT 2,          -- adults (baseline)
+  base_price_cents INT UNSIGNED NOT NULL DEFAULT 0,              -- default nightly price
+  amenities_json  JSON NULL,                                     -- optional (WiFi, Pool, etc.)
+  photos_json     JSON NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NULL ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- PHYSICAL ROOMS (each bookable unit)
+CREATE TABLE IF NOT EXISTS rooms (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  room_type_id    BIGINT UNSIGNED NOT NULL,
+  code            VARCHAR(40) NOT NULL UNIQUE,                   -- e.g., OV-101
+  floor_label     VARCHAR(40) NULL,
+  status          ENUM('active','maintenance','retired') NOT NULL DEFAULT 'active',
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_rooms_type
+    FOREIGN KEY (room_type_id) REFERENCES room_types(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- BOOKINGS (one per user order; can contain multiple rooms)
+CREATE TABLE IF NOT EXISTS bookings (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id         BIGINT UNSIGNED NULL,                          -- null for phone/email bookings by staff
+  status          ENUM('pending','confirmed','cancelled','checked_in','checked_out','refunded')
+                   NOT NULL DEFAULT 'pending',
+  total_cents     INT UNSIGNED NOT NULL DEFAULT 0,
+  currency        CHAR(3) NOT NULL DEFAULT 'USD',
+  notes           TEXT NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_bookings_user (user_id, status)
+  -- (Add FK to users if you already have a users table)
+) ENGINE=InnoDB;
+
+-- BOOKING ITEMS (each reserved room with date range)
+CREATE TABLE IF NOT EXISTS booking_items (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  booking_id      BIGINT UNSIGNED NOT NULL,
+  room_id         BIGINT UNSIGNED NOT NULL,
+  check_in        DATE NOT NULL,
+  check_out       DATE NOT NULL,                                  -- exclusive
+  price_cents     INT UNSIGNED NOT NULL DEFAULT 0,                -- subtotal for this item
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_bi_booking
+    FOREIGN KEY (booking_id) REFERENCES bookings(id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_bi_room
+    FOREIGN KEY (room_id) REFERENCES rooms(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CHECK (check_out > check_in),
+  INDEX idx_bi_room_dates (room_id, check_in, check_out)
+) ENGINE=InnoDB;
+
+-- BOOKING NIGHTS (one row PER NIGHT reserved) → prevents double-booking
+CREATE TABLE IF NOT EXISTS booking_nights (
+  id                 BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  booking_item_id    BIGINT UNSIGNED NOT NULL,
+  room_id            BIGINT UNSIGNED NOT NULL,
+  stay_date          DATE NOT NULL,                               -- each night in [check_in, check_out)
+  price_cents        INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_bn_item
+    FOREIGN KEY (booking_item_id) REFERENCES booking_items(id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_bn_room
+    FOREIGN KEY (room_id) REFERENCES rooms(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  UNIQUE KEY uq_room_date (room_id, stay_date),                   -- hard guarantee: no two bookings same room/night
+  INDEX idx_bn_room (room_id)
+) ENGINE=InnoDB;
+
+-- OPTIONAL: PAYMENTS
+CREATE TABLE IF NOT EXISTS payments (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  booking_id      BIGINT UNSIGNED NOT NULL,
+  provider        ENUM('stripe','paypal','manual') NOT NULL DEFAULT 'manual',
+  provider_ref    VARCHAR(120) NULL,
+  amount_cents    INT UNSIGNED NOT NULL DEFAULT 0,
+  status          ENUM('pending','paid','failed','refunded') NOT NULL DEFAULT 'pending',
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pay_booking
+    FOREIGN KEY (booking_id) REFERENCES bookings(id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  INDEX idx_pay_booking (booking_id, status)
+) ENGINE=InnoDB;
+
+-- OPTIONAL: GUEST SNAPSHOT (kept with booking)
+CREATE TABLE IF NOT EXISTS booking_guests (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  booking_id      BIGINT UNSIGNED NOT NULL,
+  first_name      VARCHAR(80) NOT NULL,
+  last_name       VARCHAR(80) NOT NULL,
+  email           VARCHAR(190) NOT NULL,
+  phone           VARCHAR(40) NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_bg_booking
+    FOREIGN KEY (booking_id) REFERENCES bookings(id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+
+
+USE luxresort;
+
+-- Room Types
+INSERT INTO room_types (name, slug, description, capacity, base_price_cents, amenities_json, photos_json)
+VALUES
+('Ocean Villa', 'ocean-villa', 'Private plunge pool, ocean view, butler-on-call', 2, 45000,
+ JSON_ARRAY('Ocean view','Private pool','Butler'), NULL),
+('Family Suite', 'family-suite', 'Spacious suite perfect for families', 4, 32000,
+ JSON_ARRAY('Two bedrooms','Living area','Kids amenities'), NULL);
+
+-- Physical Rooms
+INSERT INTO rooms (room_type_id, code, floor_label, status)
+VALUES
+( (SELECT id FROM room_types WHERE slug='ocean-villa'), 'OV-101', 'Beachfront', 'active'),
+( (SELECT id FROM room_types WHERE slug='ocean-villa'), 'OV-102', 'Beachfront', 'active'),
+( (SELECT id FROM room_types WHERE slug='family-suite'), 'FS-201', 'Garden Wing', 'active');
